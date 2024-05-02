@@ -1,0 +1,66 @@
+#This is the code to run the MLP with the RMS error
+
+
+import torch
+from torch import nn
+from d2l import torch as d2l
+
+import numpy as np
+import os
+
+import pandas as pd
+
+data_file = os.path.join('..', 'DataAllA.csv')
+
+data = pd.read_csv(data_file)
+print(data)
+
+inputs, targets = data.iloc[:, 0:21], data.iloc[:, 23:26]
+#inputs, targets = data.iloc[:, 0:19], data.iloc[:, 23:26]
+print(inputs)
+print(targets)
+
+input_X = torch.tensor(inputs.to_numpy(dtype=np.dtype("float32")),requires_grad=True)
+input_y = torch.tensor(targets.to_numpy(dtype=np.dtype("float32")))
+print(input_X[0])
+
+
+def k_fold(X, y, num_folds, batch_size):
+  # Split data into k folds
+  k_fold_size = len(X) // num_folds
+  X_folds = torch.split(X, k_fold_size)
+  y_folds = torch.split(y, k_fold_size)
+  # Define the K-fold cross-validation loop
+  for i in range(num_folds):
+    # Use all folds except the i-th fold as training data
+    train_X = torch.cat(X_folds[:i] + X_folds[i+1:])
+    train_y = torch.cat(y_folds[:i] + y_folds[i+1:])
+    # Use the i-th fold as validation data
+    valid_X = X_folds[i]
+    valid_y = y_folds[i]
+    # Train the model on the training data
+    net = nn.Sequential(nn.Linear(21, 512), nn.ReLU(), nn.Linear(512, 512), nn.ReLU(), nn.Linear(512, 256), nn.ReLU(), nn.Linear(256, 3))
+    #net = nn.Sequential(nn.Linear(19, 512), nn.ReLU(), nn.Linear(512, 512), nn.ReLU(), nn.Linear(512, 256), nn.ReLU(), nn.Linear(256, 3))
+    trainer = torch.optim.Adam(net.parameters())
+    num_epochs = 1500
+    for epoch in range(num_epochs):
+      for X, y in d2l.load_array((train_X, train_y), batch_size):
+        #with torch.no_grad():
+        y_hat = net(X)
+        l = torch.sqrt((torch.square(y_hat - y).sum())/torch.numel(y))
+        trainer.zero_grad()
+        l.backward()
+        trainer.step()
+    # Evaluate the model on the validation data
+    with torch.no_grad():
+      train_y_hat = net(train_X)
+      train_loss = torch.sqrt((torch.square(train_y_hat - train_y).sum())/torch.numel(train_y))
+    print(f'fold {i+1}, training loss {train_loss:.3f}')
+    with torch.no_grad():
+      valid_y_hat = net(valid_X)
+      valid_loss = torch.sqrt((torch.square(valid_y_hat - valid_y).sum())/torch.numel(valid_y))
+    print(f'fold {i+1}, validation loss {valid_loss:.3f}')
+
+
+# Perform k-fold cross-validation
+k_fold(input_X, input_y, num_folds=4, batch_size=64)

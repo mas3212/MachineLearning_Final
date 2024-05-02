@@ -1,0 +1,3 @@
+#This must be run before any of our other code
+
+!pip install d2l==1.0.3

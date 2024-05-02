@@ -1,0 +1,157 @@
+#This is the 1st attempt to run the MLP with the Delta-E error
+#This implementation was not able to improve the loss function
+
+import torch
+from torch import nn
+from d2l import torch as d2l
+
+import numpy as np
+import os
+
+data_file = os.path.join('..', 'Data3200A.csv')
+
+import pandas as pd
+
+data = pd.read_csv(data_file)
+print(data)
+
+inputs, targets = data.iloc[:, 0:19], data.iloc[:, 23:26]
+print(inputs)
+print(targets)
+
+input_X = torch.tensor(inputs.to_numpy(dtype=np.dtype("float32")),requires_grad=True)
+input_y = torch.tensor(targets.to_numpy(dtype=np.dtype("float32")))
+print(input_X[0])
+
+def lossfn(t1, t2):
+  #Convert to AWG3
+  cut400=0.008318
+  a400 =5.555556 
+  b400 =0.064901
+  c400 =0.256598
+  d400 =0.383999
+  e400 =5.571960
+  f400 =0.092795 
+  ecutf400 =0.139142
+  #ta1 = t1.clone().detach()
+  #ta2 = t2.clone().detach()
+  #for i in range(len(t1[:,0])):
+  #  for j in range(len(t1[0, :])):
+  #    if t1[i,j] > ecutf400:
+  #      ta1[i,j] = (pow(10,((t1[i,j]-d400)/c400))-b400)/a400
+  #    else:
+  #      ta1[i,j] = (t1[i,j]-f400)/e400
+  #for i in range(len(t2[:,0])):
+  #  for j in range(len(t2[0, :])):
+  #    if t2[i,j] > ecutf400:
+  #      ta2[i,j] = (pow(10,((t2[i,j]-d400)/c400))-b400)/a400
+  #    else:
+  #      ta2[i,j] = (t2[i,j]-f400)/e400
+  ta1 = (pow(10,((t1-d400)/c400))-b400)/a400
+  ta2 = (pow(10,((t2-d400)/c400))-b400)/a400
+  M_C3 = torch.tensor([[0.638008, 0.214704, 0.097744],
+                       [0.291954, 0.823841, -0.115795],
+                       [0.002798, -0.067034, 1.153294]])
+  #Convert to XYZ
+  ta1t = torch.transpose(ta1,0,1)
+  tx1 = torch.mm(M_C3, ta1t)
+  tx1t = torch.transpose(tx1,0,1)
+  ta2t = torch.transpose(ta2,0,1)
+  tx2 = torch.mm(M_C3, ta2t)
+  tx2t = torch.transpose(tx2,0,1)
+  #Convert to Lab (batchssizex3)
+  #for 3200 
+  XYZref = torch.tensor([1.061186, 1.000000, 0.445394])
+  #for 5500 (64x3)
+  #XYZref = torch.tensor([0.956743, 1.000000, 0.92128])
+  #tx1t2 = tx1t.clone().detach()
+  #tx2t2 = tx2t.clone().detach()
+  #tx1t3 = tx1t.clone().detach()
+  #tx2t3 = tx2t.clone().detach()
+  #for i in range(len(tx1t)):
+  #  for j in range(3):
+  #    tx1t2[i,j]=tx1t[i,j]/XYZref[j]
+  #    if tx1t2[i,j] > 0.008856:
+  #      tx1t3[i,j] = pow(tx1t2[i,j], (1/3))
+  #    else:
+  #      tx1t3[i,j] = 7.787*tx1t2[i,j]+(16/116)
+  #for i in range(len(tx2t)):
+  #  for j in range(3):
+  #    tx2t2[i,j]=tx2t[i,j]/XYZref[j]
+  #    if tx2t2[i,j] > 0.008856:
+  #      tx2t3[i,j] = pow(tx2t2[i,j], (1/3))
+  #    else:
+  #      tx2t3[i,j] = 7.787*tx2t2[i,j]+(16/116)
+  tx1z = torch.zeros_like(tx1t)
+  tx1p = torch.max(tx1t,tx1z)
+  tx1t2 = tx1p/XYZref
+  tx1t3 = pow(tx1t2, (1/3))
+  tx2z = torch.zeros_like(tx2t)
+  tx2p = torch.max(tx2t,tx2z)
+  tx2t2 = tx2p/XYZref
+  tx2t3 = pow(tx2t2, (1/3))
+  #tl1 = tx1t3.clone().detach()
+  #tl2 = tx2t3.clone().detach()
+  #for i in range(len(tx1t3)):
+  #  tl1[i,0] = 116*tx1t3[i,1]-16
+  #  tl1[i,1] = 500*(tx1t3[i,0]-tx1t3[i,1])
+  #  tl1[i,2] = 200*(tx1t3[i,1]-tx1t3[i,2])
+  #for i in range(len(tx2t3)):
+  #  tl2[i,0] = 116*tx2t3[i,1]-16
+  #  tl2[i,1] = 500*(tx2t3[i,0]-tx1t3[i,1])
+  #  tl2[i,2] = 200*(tx2t3[i,1]-tx1t3[i,2])
+  tl1l = 116*tx1t3[:,1]-16
+  tl1a = 500*(tx1t3[:,0]-tx1t3[:,1])
+  tl1b = 200*(tx1t3[:,1]-tx1t3[:,2])
+  tl2l = 116*tx2t3[:,1]-16
+  tl2a = 500*(tx2t3[:,0]-tx2t3[:,1])
+  tl2b = 200*(tx2t3[:,1]-tx2t3[:,2])
+  #Calculate deltaE
+  DEabTot=0
+  for i in range(len(tx1t3)):
+    DEabCur = torch.sqrt(pow(tl1l[i]-tl2l[i],2)+pow(tl1a[i]-tl2a[i],2)+pow(tl1b[i]-tl2b[i],2))
+    DEabTot = DEabTot + DEabCur
+  DEAvg = DEabTot/len(tx1t3)
+  print(DEAvg)
+  #For root mean square:
+  #return torch.sqrt((torch.square(t1 - t2).sum())/torch.numel(t2))
+  return DEAvg
+
+def k_fold(X, y, num_folds, batch_size):
+  # Split data into k folds
+  k_fold_size = len(X) // num_folds
+  X_folds = torch.split(X, k_fold_size)
+  y_folds = torch.split(y, k_fold_size)
+  # Define the K-fold cross-validation loop
+  for i in range(num_folds):
+    # Use all folds except the i-th fold as training data
+    train_X = torch.cat(X_folds[:i] + X_folds[i+1:])
+    train_y = torch.cat(y_folds[:i] + y_folds[i+1:])
+    # Use the i-th fold as validation data
+    valid_X = X_folds[i]
+    valid_y = y_folds[i]
+    # Train the model on the training data
+    net = nn.Sequential(nn.Linear(19, 512), nn.ReLU(), nn.Linear(512, 512), nn.ReLU(), nn.Linear(512, 3))
+    trainer = torch.optim.Adam(net.parameters())
+    num_epochs = 1000
+    for epoch in range(num_epochs):
+      for X, y in d2l.load_array((train_X, train_y), batch_size):
+        #with torch.no_grad():
+        y_hat = net(X)
+        l = lossfn(y_hat, y)
+        #torch.autograd.set_detect_anomaly(True)
+        trainer.zero_grad()
+        l.backward()
+        trainer.step()
+    # Evaluate the model on the validation data
+    with torch.no_grad():
+      train_y_hat = net(train_X)
+      train_loss = torch.sqrt((torch.square(train_y_hat - train_y).sum())/torch.numel(train_y))
+    print(f'fold {i+1}, training loss {train_loss:.3f}')
+    with torch.no_grad():
+      valid_y_hat = net(valid_X)
+      valid_loss = torch.sqrt((torch.square(valid_y_hat - valid_y).sum())/torch.numel(valid_y))
+    print(f'fold {i+1}, validation loss {valid_loss:.3f}')
+
+# Perform k-fold cross-validation
+k_fold(input_X, input_y, num_folds=4, batch_size=64)
